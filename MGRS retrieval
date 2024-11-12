@@ -1,0 +1,93 @@
+import os
+import aiohttp
+import aiofiles
+import asyncio
+import zipfile
+from tqdm.asyncio import tqdm
+from pathlib import Path
+import shutil
+import time
+
+# Base URL for downloading MGRS files
+BASE_URL = "https://earth-info.nga.mil/php/download.php?file=MGRS_100kmSQ_ID_"
+OUTPUT_DIR = Path("output")
+SHAPEFILE_DIR = OUTPUT_DIR / "shapefiles"
+
+# Create necessary directories
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+SHAPEFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Grid naming conventions
+LONGITUDINAL = range(1, 61)
+LATITUDINAL = [chr(c) for c in range(ord('C'), ord('Y')) if chr(c) not in ['I', 'O']]
+
+# Generate URLs
+def generate_urls():
+    return [f"{BASE_URL}{lon:02d}{lat}" for lon in LONGITUDINAL for lat in LATITUDINAL]
+
+async def download_file(url, session, output_path):
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                async with aiofiles.open(output_path, 'wb') as f:
+                    await f.write(await response.read())
+    except Exception as e:
+        print(f"Failed to download {url}: {e}")
+
+async def download_all_files(urls):
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for url in urls:
+            file_name = url.split("=")[-1] + ".zip"
+            output_path = OUTPUT_DIR / file_name
+            tasks.append(download_file(url, session, output_path))
+        
+        for f in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Downloading files"):
+            await f
+
+# Extract only relevant shapefiles (.shp, .shx, .dbf, .prj) and clean up unnecessary files
+def extract_and_collect_shapefiles():
+    zip_files = list(OUTPUT_DIR.glob("*.zip"))
+    extracted_files_count = 0
+
+    for zip_path in tqdm(zip_files, desc="Extracting files"):
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                for file in zip_ref.namelist():
+                    if file.endswith(('.shp', '.shx', '.dbf', '.prj')):
+                        # Extract directly to SHAPEFILE_DIR
+                        destination_path = SHAPEFILE_DIR / Path(file).name
+                        destination_path.parent.mkdir(parents=True, exist_ok=True)
+                        with zip_ref.open(file) as source_file, open(destination_path, 'wb') as dest_file:
+                            shutil.copyfileobj(source_file, dest_file)
+                        extracted_files_count += 1
+                        print(f"Extracted {file} to {destination_path}")
+            zip_path.unlink()  # Delete the zip file after extraction
+        except zipfile.BadZipFile:
+            print(f"Failed to extract {zip_path} (corrupt zip)")
+
+    # Remove any other directories left in OUTPUT_DIR except SHAPEFILE_DIR
+    for dir_path in OUTPUT_DIR.glob("*/"):
+        if dir_path.is_dir() and dir_path != SHAPEFILE_DIR:
+            shutil.rmtree(dir_path)
+    
+    return extracted_files_count
+
+async def main():
+    start_time = time.time()
+    urls = generate_urls()
+    print(f"Starting download of {len(urls)} files...")
+
+    await download_all_files(urls)
+
+    print("All files downloaded. Starting extraction...")
+    extracted_files_count = extract_and_collect_shapefiles()
+
+    elapsed_time = time.time() - start_time
+    print(f"Process completed in {elapsed_time:.2f} seconds.")
+    print(f"Total shapefiles extracted: {extracted_files_count}")
+    print(f"Shapefiles stored in: {SHAPEFILE_DIR.resolve()}")
+
+# Entry point for running the script
+if __name__ == "__main__":
+    asyncio.run(main())
