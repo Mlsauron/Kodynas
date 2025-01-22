@@ -1,0 +1,104 @@
+import requests
+import geopandas as gpd
+import pandas as pd
+import time
+from tqdm import tqdm
+from shapely.geometry import Point
+import os
+
+def fetch_and_process_data():
+    start_time = time.time()
+    url = 'https://eismoinfo.lt/weather-conditions-service'
+    output_gpkg_path = 'C:\\Py\\eismoinfo\\meteo_duomenys.gpkg'
+    layer_name = 'weather_data'  # Layer name within the GeoPackage
+
+    # Fetch the data
+    response = requests.get(url)
+    data = response.json()
+
+    # Create an empty list to store rows
+    rows = []
+
+    # Convert each feature to a dictionary and add to rows list
+    for feature in tqdm(data, desc="Apdorojama elementų", unit="feature"):
+        point = Point(float(feature['lng']), float(feature['lat']))
+
+        # Convert numerical strings to appropriate types, handling None values
+        surinkimo_data_unix = int(feature['surinkimo_data_unix']) if feature['surinkimo_data_unix'] is not None else None
+        oro_temperatura = float(feature['oro_temperatura']) if feature['oro_temperatura'] is not None else None
+        vejo_greitis_vidut = float(feature['vejo_greitis_vidut']) if feature['vejo_greitis_vidut'] is not None else None
+        krituliu_kiekis = float(feature['krituliu_kiekis']) if feature['krituliu_kiekis'] is not None else None
+        dangos_temperatura = float(feature['dangos_temperatura']) if feature['dangos_temperatura'] is not None else None
+        matomumas = int(feature['matomumas']) if feature['matomumas'] is not None else None
+        vejo_greitis_maks = float(feature['vejo_greitis_maks']) if feature['vejo_greitis_maks'] is not None else None
+        sukibimo_koeficientas = float(feature['sukibimo_koeficientas']) if feature['sukibimo_koeficientas'] is not None else None
+        ilguma = int(feature['ilguma']) if feature['ilguma'] is not None else None
+        platuma = int(feature['platuma']) if feature['platuma'] is not None else None
+
+        row = {
+            'surinkimo_data_unix': surinkimo_data_unix,
+            'surinkimo_data': feature['surinkimo_data'],
+            'id': feature['id'],
+            'irenginys': feature['irenginys'],
+            'numeris': feature['numeris'],
+            'pavadinimas': feature['pavadinimas'],
+            'kilometras': feature['kilometras'],
+            'oro_temperatura': oro_temperatura,
+            'vejo_greitis_vidut': vejo_greitis_vidut,
+            'krituliu_tipas': feature['krituliu_tipas'],
+            'krituliu_kiekis': krituliu_kiekis,
+            'dangos_temperatura': dangos_temperatura,
+            'matomumas': matomumas,
+            'rasos_taskas': feature['rasos_taskas'],
+            'kelio_danga': feature['kelio_danga'],
+            'uzsalimo_taskas': feature['uzsalimo_taskas'],
+            'vejo_greitis_maks': vejo_greitis_maks,
+            'vejo_kryptis': feature['vejo_kryptis'],
+            'sukibimo_koeficientas': sukibimo_koeficientas,
+            'ilguma': ilguma,
+            'platuma': platuma,
+            'lat': float(feature['lat']) if feature['lat'] is not None else None,
+            'lng': float(feature['lng']) if feature['lng'] is not None else None,
+            'geometry': point
+        }
+        rows.append(row)
+
+    # Create GeoDataFrame from rows
+    new_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+
+    # Initialize the counts
+    original_count = 0
+    new_records_count = len(new_gdf)
+
+    # Check if the GeoPackage file exists
+    if os.path.exists(output_gpkg_path):
+        try:
+            # Read existing data from GeoPackage
+            existing_gdf = gpd.read_file(output_gpkg_path, layer=layer_name)
+            original_count = len(existing_gdf)
+            # Concatenate new data to existing data
+            combined_gdf = pd.concat([existing_gdf, new_gdf], ignore_index=True)
+            # Deduplicate based on unique identifier 'id'
+            combined_gdf = combined_gdf.drop_duplicates(subset='id', keep='last')
+        except Exception as e:
+            print(f"Klaida nuskaitant esamą bylą '{layer_name}': {e}")
+            combined_gdf = new_gdf
+    else:
+        combined_gdf = new_gdf
+
+    # Save combined data to GeoPackage, overwriting the existing layer
+    combined_gdf.to_file(output_gpkg_path, layer=layer_name, driver='GPKG', mode='w')
+
+    # End timing
+    end_time = time.time()
+    elapsed_time = time.strftime("%H:%M:%S", time.gmtime(end_time - start_time))
+
+    # Print summary
+    print(f"Geopakas išsaugotas: {output_gpkg_path}")
+    print(f"Surasta įrašų byloje: {original_count}")
+    print(f"Pridėta naujų įrašų: {new_records_count}")
+    print(f"Iš viso yra įrašų po pakartotinės sąjungos: {len(combined_gdf)}")
+    print(f"Praėjo laiko: {elapsed_time}")
+
+if __name__ == "__main__":
+    fetch_and_process_data()
