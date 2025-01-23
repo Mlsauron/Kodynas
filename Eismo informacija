@@ -9,17 +9,17 @@ import os
 def fetch_and_process_data():
     start_time = time.time()
     url = 'https://eismoinfo.lt/weather-conditions-service'
-    output_gpkg_path = 'C:\\Py\\eismoinfo\\meteo_duomenys.gpkg'
-    layer_name = 'weather_data'  # Layer name within the GeoPackage
+    output_gpkg_path = 'C:\\Kelias\\i\\\\byla\\meteo_duomenys.gpkg'
+    layer_name = 'eismoinfo_taskai'  # Kaip vadinsis duomenų sluoksis GIS aplinkoje
 
-    # Fetch the data
+    # Surenkam duomenis
     response = requests.get(url)
     data = response.json()
 
-    # Create an empty list to store rows
+    # Sukuriam tuščią sąrašą
     rows = []
 
-    # Convert each feature to a dictionary and add to rows list
+    # Sukuriam duomenis ir sutvarkome juos
     for feature in tqdm(data, desc="Apdorojama elementų", unit="feature"):
         point = Point(float(feature['lng']), float(feature['lat']))
 
@@ -63,17 +63,16 @@ def fetch_and_process_data():
         }
         rows.append(row)
 
-    # Create GeoDataFrame from rows
-    new_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+        new_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
-    # Initialize the counts
+    # Skaičiuojame elementus
     original_count = 0
     new_records_count = len(new_gdf)
 
-    # Check if the GeoPackage file exists
+    # Tikriname, ar yra Geopakas
     if os.path.exists(output_gpkg_path):
         try:
-            # Read existing data from GeoPackage
+            # Nuskaitome jau esamus duomenis
             existing_gdf = gpd.read_file(output_gpkg_path, layer=layer_name)
             original_count = len(existing_gdf)
             # Concatenate new data to existing data
@@ -86,14 +85,14 @@ def fetch_and_process_data():
     else:
         combined_gdf = new_gdf
 
-    # Save combined data to GeoPackage, overwriting the existing layer
+    # IŠsaugome geopaką, perrašom iš naujo
     combined_gdf.to_file(output_gpkg_path, layer=layer_name, driver='GPKG', mode='w')
 
     # End timing
     end_time = time.time()
     elapsed_time = time.strftime("%H:%M:%S", time.gmtime(end_time - start_time))
 
-    # Print summary
+    # Teksto spausdinimas
     print(f"Geopakas išsaugotas: {output_gpkg_path}")
     print(f"Surasta įrašų byloje: {original_count}")
     print(f"Pridėta naujų įrašų: {new_records_count}")
