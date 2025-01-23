@@ -5,97 +5,87 @@ import time
 from tqdm import tqdm
 from shapely.geometry import Point
 import os
+from datetime import datetime
 
 def fetch_and_process_data():
     start_time = time.time()
     url = 'https://eismoinfo.lt/weather-conditions-service'
-    output_gpkg_path = 'C:\\Kelias\\i\\\\byla\\meteo_duomenys.gpkg'
-    layer_name = 'eismoinfo_taskai'  # Kaip vadinsis duomenų sluoksis GIS aplinkoje
+    output_gpkg_path = 'C:\\Kelias\\į duomenis\\eismo_info.gpkg'
+    layer_name = 'eismo_taskai'  # GIS sluoksnio pavadinimas
 
-    # Surenkam duomenis
+    # Gauti duomenis iš API
     response = requests.get(url)
+    response.raise_for_status()  # Patikrina, ar nėra klaidų
     data = response.json()
 
-    # Sukuriam tuščią sąrašą
+    # Sukuriame tuščią sąrašą
     rows = []
 
-    # Sukuriam duomenis ir sutvarkome juos
+    # Apdorojame duomenis
     for feature in tqdm(data, desc="Apdorojama elementų", unit="feature"):
         point = Point(float(feature['lng']), float(feature['lat']))
 
-        # Convert numerical strings to appropriate types, handling None values
-        surinkimo_data_unix = int(feature['surinkimo_data_unix']) if feature['surinkimo_data_unix'] is not None else None
-        oro_temperatura = float(feature['oro_temperatura']) if feature['oro_temperatura'] is not None else None
-        vejo_greitis_vidut = float(feature['vejo_greitis_vidut']) if feature['vejo_greitis_vidut'] is not None else None
-        krituliu_kiekis = float(feature['krituliu_kiekis']) if feature['krituliu_kiekis'] is not None else None
-        dangos_temperatura = float(feature['dangos_temperatura']) if feature['dangos_temperatura'] is not None else None
-        matomumas = int(feature['matomumas']) if feature['matomumas'] is not None else None
-        vejo_greitis_maks = float(feature['vejo_greitis_maks']) if feature['vejo_greitis_maks'] is not None else None
-        sukibimo_koeficientas = float(feature['sukibimo_koeficientas']) if feature['sukibimo_koeficientas'] is not None else None
-        ilguma = int(feature['ilguma']) if feature['ilguma'] is not None else None
-        platuma = int(feature['platuma']) if feature['platuma'] is not None else None
-
+        # Konvertuojame laukus, tvarkome None reikšmes
         row = {
-            'surinkimo_data_unix': surinkimo_data_unix,
+            'surinkimo_data_unix': int(feature['surinkimo_data_unix']) if feature['surinkimo_data_unix'] is not None else None,
             'surinkimo_data': feature['surinkimo_data'],
             'id': feature['id'],
             'irenginys': feature['irenginys'],
             'numeris': feature['numeris'],
             'pavadinimas': feature['pavadinimas'],
             'kilometras': feature['kilometras'],
-            'oro_temperatura': oro_temperatura,
-            'vejo_greitis_vidut': vejo_greitis_vidut,
+            'oro_temperatura': float(feature['oro_temperatura']) if feature['oro_temperatura'] is not None else None,
+            'vejo_greitis_vidut': float(feature['vejo_greitis_vidut']) if feature['vejo_greitis_vidut'] is not None else None,
             'krituliu_tipas': feature['krituliu_tipas'],
-            'krituliu_kiekis': krituliu_kiekis,
-            'dangos_temperatura': dangos_temperatura,
-            'matomumas': matomumas,
+            'krituliu_kiekis': float(feature['krituliu_kiekis']) if feature['krituliu_kiekis'] is not None else None,
+            'dangos_temperatura': float(feature['dangos_temperatura']) if feature['dangos_temperatura'] is not None else None,
+            'matomumas': int(feature['matomumas']) if feature['matomumas'] is not None else None,
             'rasos_taskas': feature['rasos_taskas'],
             'kelio_danga': feature['kelio_danga'],
             'uzsalimo_taskas': feature['uzsalimo_taskas'],
-            'vejo_greitis_maks': vejo_greitis_maks,
+            'vejo_greitis_maks': float(feature['vejo_greitis_maks']) if feature['vejo_greitis_maks'] is not None else None,
             'vejo_kryptis': feature['vejo_kryptis'],
-            'sukibimo_koeficientas': sukibimo_koeficientas,
-            'ilguma': ilguma,
-            'platuma': platuma,
-            'lat': float(feature['lat']) if feature['lat'] is not None else None,
-            'lng': float(feature['lng']) if feature['lng'] is not None else None,
+            'sukibimo_koeficientas': float(feature['sukibimo_koeficientas']) if feature['sukibimo_koeficientas'] is not None else None,
+            'ilguma': float(feature['lng']),
+            'platuma': float(feature['lat']),
             'geometry': point
         }
         rows.append(row)
 
-        new_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    # Paverčiame į GeoDataFrame
+    new_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
 
-    # Skaičiuojame elementus
-    original_count = 0
-    new_records_count = len(new_gdf)
-
-    # Tikriname, ar yra Geopakas
+    # Patikriname, ar jau egzistuoja geopakas
     if os.path.exists(output_gpkg_path):
         try:
             # Nuskaitome jau esamus duomenis
             existing_gdf = gpd.read_file(output_gpkg_path, layer=layer_name)
             original_count = len(existing_gdf)
-            # Concatenate new data to existing data
+
+            # Sujungiame naujus duomenis su esamais
             combined_gdf = pd.concat([existing_gdf, new_gdf], ignore_index=True)
-            # Deduplicate based on unique identifier 'id'
-            combined_gdf = combined_gdf.drop_duplicates(subset='id', keep='last')
+
+            # Deduplikuojame pagal 'id' ir 'surinkimo_data'
+            combined_gdf = combined_gdf.drop_duplicates(subset=['id', 'surinkimo_data'], keep='last')
         except Exception as e:
             print(f"Klaida nuskaitant esamą bylą '{layer_name}': {e}")
             combined_gdf = new_gdf
+            original_count = 0
     else:
         combined_gdf = new_gdf
+        original_count = 0
 
-    # IŠsaugome geopaką, perrašom iš naujo
+    # Išsaugome Geopackage
     combined_gdf.to_file(output_gpkg_path, layer=layer_name, driver='GPKG', mode='w')
 
-    # End timing
+    # Laiko matavimas
     end_time = time.time()
     elapsed_time = time.strftime("%H:%M:%S", time.gmtime(end_time - start_time))
 
-    # Teksto spausdinimas
+    # Spausdiname statistiką
     print(f"Geopakas išsaugotas: {output_gpkg_path}")
     print(f"Surasta įrašų byloje: {original_count}")
-    print(f"Pridėta naujų įrašų: {new_records_count}")
+    print(f"Pridėta naujų įrašų: {len(new_gdf)}")
     print(f"Iš viso yra įrašų po pakartotinės sąjungos: {len(combined_gdf)}")
     print(f"Praėjo laiko: {elapsed_time}")
 
